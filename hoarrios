@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App Nelton - Horários</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <style>
+        :root {
+            --primary: #1b5e20; --bg: #f4fbf4; --white: #ffffff;
+            --plan: #e3f2fd; --recomp: #fff3e0; --mat: #c8e6c9;
+            --now: #d32f2f; /* Destaque para aula atual */
+        }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 15px; padding-bottom: 80px; }
+        .header-controls { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 20px; }
+        h2 { margin: 0; color: var(--primary); }
+        .btn-toggle { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .btn-pdf { position: fixed; bottom: 20px; right: 20px; background: #d32f2f; color: white; border: none; padding: 15px; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 5; cursor: pointer; }
+        
+        .container { max-width: 500px; margin: auto; }
+        .day-card { background: var(--white); border-radius: 12px; margin-bottom: 20px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: none; }
+        .day-card.visible { display: block; }
+        .day-header { background: var(--primary); color: white; padding: 12px; font-weight: bold; text-align: center; }
+        
+        .aula-item { display: flex; padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; position: relative; }
+        .aula-agora { border: 2.5px solid var(--now) !important; background: #fff5f5 !important; font-weight: bold; }
+        
+        .aula-num-box { width: 65px; font-size: 0.75rem; color: #666; border-right: 1px solid #eee; margin-right: 10px; display: flex; flex-direction: column; justify-content: center; }
+        .aula-num { font-weight: bold; font-size: 0.9rem; color: #222; }
+        .info-aula { flex-grow: 1; font-size: 0.9rem; align-self: center; }
+        
+        .tipo-mat { background: var(--mat); border-left: 5px solid var(--primary); }
+        .tipo-plan { background: var(--plan); }
+        .tipo-recomp { background: var(--recomp); }
+        .break { background: #eeeeee; font-size: 0.8rem; text-align: center; justify-content: center; font-weight: bold; color: #555; }
+        .folga { color: #ccc; font-style: italic; }
+
+        #modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:10; justify-content:center; align-items:center; }
+        .modal-content { background: white; width: 90%; max-width: 400px; padding: 20px; border-radius: 15px; }
+        textarea { width: 100%; height: 120px; margin: 10px 0; border: 1px solid #ccc; border-radius: 8px; padding: 10px; box-sizing: border-box; }
+        .btn-save { width: 100%; background: var(--primary); color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="header-controls">
+        <h2 id="titulo-pagina">Hoje - Nelton</h2>
+        <button class="btn-toggle" onclick="toggleVista()">🗓️ Horário Semanal</button>
+    </div>
+
+    <div class="container" id="grade"></div>
+    <button class="btn-pdf" onclick="escolherDiaParaPDF()">📄 Gerar PDF</button>
+
+    <div id="modal">
+        <div class="modal-content">
+            <h3 id="m-titulo" style="margin-top:0"></h3>
+            <p id="m-sub" style="font-size: 0.9rem; color: #666;"></p>
+            <textarea id="m-texto" placeholder="Anotações para esta aula..."></textarea>
+            <button class="btn-save" onclick="salvarNota()">Salvar Anotação</button>
+        </div>
+    </div>
+
+<script>
+    let notas = JSON.parse(localStorage.getItem('notas_nelton')) || {};
+    let aulaEditId = "";
+    let vistaSemanal = false;
+
+    // Horários solicitados
+    const horarios = [
+        { ini: "07:10", fim: "08:00" }, // 1ª
+        { ini: "08:00", fim: "08:50" }, // 2ª
+        { ini: "08:50", fim: "09:40" }, // 3ª
+        { ini: "09:40", fim: "10:00" }, // INTER
+        { ini: "10:00", fim: "10:50" }, // 4ª
+        { ini: "10:50", fim: "11:40" }, // 5ª
+        { ini: "11:40", fim: "13:00" }, // ALMOÇO
+        { ini: "13:00", fim: "13:50" }, // 6ª
+        { ini: "13:50", fim: "14:40" }, // 7ª
+        { ini: "14:40", fim: "15:00" }, // INTER
+        { ini: "15:00", fim: "15:50" }, // 8ª
+        { ini: "15:50", fim: "16:40" }  // 9ª
+    ];
+
+    const dados = [
+        { dia: "SEGUNDA-FEIRA", aulas: ["PLAN.", "LEC RECOMP.", "PLAN.", "INTER", "LEC RECOMP.", "PLAN.", "ALMOÇO", "PLAN.", "LEC RECOMP.", "INTER", "LEC RECOMP.", "PLAN."] },
+        { dia: "TERÇA-FEIRA", aulas: ["PLAN.", "LEC RECOMP.", "1º ADM MATEMÁTICA", "INTER", "1º ADM MATEMÁTICA", "LEC RECOMP.", "ALMOÇO", "PLAN.", "LEC RECOMP.", "INTER", "FOLGA", "FOLGA"] },
+        { dia: "QUARTA-FEIRA", aulas: ["DT", "DT", "DT", "INTER", "PLAN.", "PLAN.", "ALMOÇO", "3º B MATEMÁTICA", "3º B MATEMÁTICA", "INTER", "PLAN.", "FOLGA"] },
+        { dia: "QUINTA-FEIRA", aulas: ["PLAN.", "LEC RECOMP.", "PLAN.", "INTER", "1º ADM MATEMÁTICA", "1º ADM MATEMÁTICA", "ALMOÇO", "PLAN.", "LEC RECOMP.", "INTER", "FOLGA", "FOLGA"] },
+        { dia: "SEXTA-FEIRA", aulas: ["3º A MATEMÁTICA", "3º A MATEMÁTICA", "1º ADM FPC", "INTER", "PLAN.", "PLAN.", "ALMOÇO", "3º C MATEMÁTICA", "3º C MATEMÁTICA", "INTER", "PLAN.", "FOLGA"] }
+    ];
+
+    function renderizar() {
+        const container = document.getElementById('grade');
+        container.innerHTML = "";
+        const agora = new Date();
+        const minAtual = agora.getHours() * 60 + agora.getMinutes();
+        const diaHojeIdx = agora.getDay() - 1;
+
+        dados.forEach((d, diaIdx) => {
+            let visible = (diaIdx === diaHojeIdx || vistaSemanal) ? "visible" : "";
+            let html = `<div class="day-card ${visible}"><div class="day-header">${d.dia}</div>`;
+            let aCount = 1;
+
+            d.aulas.forEach((aula, aIdx) => {
+                const id = `nelton-${diaIdx}-${aIdx}`;
+                const h = horarios[aIdx];
+                
+                // Cálculo da aula atual
+                let isAgora = false;
+                if(diaIdx === diaHojeIdx) {
+                    const [hIni, mIni] = h.ini.split(':').map(Number);
+                    const [hFim, mFim] = h.fim.split(':').map(Number);
+                    if(minAtual >= (hIni*60+mIni) && minAtual < (hFim*60+mFim)) isAgora = true;
+                }
+
+                if(["INTER", "ALMOÇO"].includes(aula)) {
+                    html += `<div class="aula-item break ${isAgora?'aula-agora':''}">${aula} (${h.ini})</div>`;
+                } else {
+                    let tipo = aula.includes("MATEMÁTICA") ? "tipo-mat" : (aula.includes("RECOMP") ? "tipo-recomp" : "tipo-plan");
+                    if(aula === "FOLGA") tipo = "folga";
+                    let notaStatus = notas[id] ? "block" : "none";
+
+                    html += `
+                        <div class="aula-item ${tipo} ${isAgora?'aula-agora':''}" onclick="abrirModal('${id}', '${aula}', '${d.dia} - ${aCount}ª Aula')">
+                            <div class="aula-num-box">
+                                <span class="aula-num">${aCount}ª</span>
+                                <span>${h.ini}</span>
+                            </div>
+                            <div class="info-aula">${aula} <div style="display:${notaStatus}; font-size:0.7rem; color:green;">📝 Anotado</div></div>
+                        </div>`;
+                    aCount++;
+                }
+            });
+            container.innerHTML += html + `</div>`;
+        });
+    }
+
+    function toggleVista() { vistaSemanal = !vistaSemanal; document.getElementById('titulo-pagina').innerText = vistaSemanal ? "Horário Semanal" : "Hoje"; renderizar(); }
+    function abrirModal(id, t, s) { aulaEditId = id; document.getElementById('m-titulo').innerText = t; document.getElementById('m-sub').innerText = s; document.getElementById('m-texto').value = notas[id] || ""; document.getElementById('modal').style.display = 'flex'; }
+    function salvarNota() { notas[aulaEditId] = document.getElementById('m-texto').value; localStorage.setItem('notas_nelton', JSON.stringify(notas)); renderizar(); document.getElementById('modal').style.display = 'none'; }
+    
+    function escolherDiaParaPDF() {
+        const d = prompt("Qual dia para o PDF? (Ex: SEGUNDA)").toUpperCase();
+        const i = dados.findIndex(x => x.dia.includes(d));
+        if(i !== -1) gerarPDF(i);
+    }
+
+    async function gerarPDF(diaIdx) {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(16); doc.text(`Planejamento Nelton - ${dados[diaIdx].dia}`, 20, 20);
+        let y = 40;
+        dados[diaIdx].aulas.forEach((aula, aIdx) => {
+            if(!["INTER", "ALMOÇO", "FOLGA"].includes(aula)) {
+                doc.setFontSize(11); doc.text(`${horarios[aIdx].ini} - ${aula}`, 20, y);
+                doc.setFontSize(10); doc.text(`Obs: ${notas[`nelton-${diaIdx}-${aIdx}`] || "---"}`, 25, y+7, {maxWidth: 160});
+                y += 20;
+            }
+        });
+        window.open(doc.output('bloburl'), '_blank');
+    }
+
+    renderizar();
+    setInterval(renderizar, 30000); // Atualiza o destaque a cada 30 segundos
+</script>
+</body>
+</html>
